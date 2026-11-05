@@ -343,6 +343,35 @@ const FINDINGS_SCHEMA = {
   required: ["verdict", "summary", "findings"],
 }
 
+const MAX_REPAIR_PROBLEMS = 6
+
+type RepairKind = "missing" | "invalid" | "partial"
+
+/**
+ * Follow-up sent to a reviewer whose turn did not yield a schema-valid review.
+ * It carries the validator's exact complaints and the schema so the reviewer can
+ * repair its payload in the same session instead of redoing the whole review.
+ */
+function buildRepairPrompt(kind: RepairKind, problems: string[]): string {
+  const opening =
+    kind === "missing"
+      ? "Your previous turn ended before you produced the required JSON review."
+      : kind === "partial"
+        ? "Your previous turn's JSON had findings that do not match the required schema and were excluded."
+        : "Your previous turn produced a JSON object that could not be accepted as a council review."
+  const shown = problems.slice(0, MAX_REPAIR_PROBLEMS)
+  const hidden = problems.length - shown.length
+  return [
+    opening,
+    ...(shown.length > 0 ? ["", "Problems:", ...shown.map((problem) => `- ${problem}`)] : []),
+    ...(hidden > 0 ? [`- ...and ${hidden} more`] : []),
+    "",
+    "Reply now with ONLY the corrected JSON object, exactly once, using the analysis you already did. Do not run any more commands or tools, and do not start over.",
+    "Keep every finding that was already valid; fix or remove only the invalid ones. The JSON object must match this schema:",
+    JSON.stringify(FINDINGS_SCHEMA),
+  ].join("\n")
+}
+
 function tokens(text: string): Set<string> {
   const out = new Set<string>()
   for (const word of text.toLowerCase().split(/[^a-z0-9_]+/)) {
@@ -928,15 +957,24 @@ function extractJson(text: string): unknown | undefined {
   return undefined
 }
 
-function normalizeFinding(raw: unknown): Finding | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+function findingProblem(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "must be a JSON object"
   const finding = raw as Record<string, unknown>
   const severity = typeof finding.severity === "string" ? finding.severity.trim().toLowerCase() : ""
-  if (!Object.hasOwn(SEVERITY_RANK, severity)) return undefined
-  const file = typeof finding.file === "string" ? finding.file.trim() : ""
-  const title = typeof finding.title === "string" ? finding.title.trim() : ""
-  const detail = typeof finding.detail === "string" ? finding.detail.trim() : ""
-  if (!file || !title || !detail) return undefined
+  if (!Object.hasOwn(SEVERITY_RANK, severity)) return `"severity" must be one of critical, major, minor, nit`
+  if (typeof finding.file !== "string" || !finding.file.trim()) return `"file" must be a non-empty string`
+  if (typeof finding.title !== "string" || !finding.title.trim()) return `"title" must be a non-empty string`
+  if (typeof finding.detail !== "string" || !finding.detail.trim()) return `"detail" must be a non-empty string`
+  return undefined
+}
+
+function normalizeFinding(raw: unknown): Finding | undefined {
+  if (findingProblem(raw)) return undefined
+  const finding = raw as Record<string, unknown>
+  const severity = (finding.severity as string).trim().toLowerCase()
+  const file = (finding.file as string).trim()
+  const title = (finding.title as string).trim()
+  const detail = (finding.detail as string).trim()
   let line: number | undefined
   const rawLine = finding.line
   if (typeof rawLine === "number" && Number.isInteger(rawLine)) line = rawLine
@@ -946,24 +984,55 @@ function normalizeFinding(raw: unknown): Finding | undefined {
   return { severity: severity as Severity, file, line, title, detail, suggestion }
 }
 
-function validateReviewOutput(raw: unknown): { output?: ReviewOutput; dropped: number; error?: string } {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { dropped: 0, error: "no review JSON object" }
+function validateReviewOutput(raw: unknown): {
+  output?: ReviewOutput
+  dropped: number
+  error?: string
+  problems: string[]
+} {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      dropped: 0,
+      error: "no review JSON object",
+      problems: ["no JSON object was found in the final message"],
+    }
+  }
   const candidate = raw as Record<string, unknown>
   const verdict = typeof candidate.verdict === "string" ? candidate.verdict.trim() : ""
   if (verdict !== "approve" && verdict !== "approve_with_comments" && verdict !== "request_changes") {
-    return { dropped: 0, error: "review JSON has no valid verdict" }
+    return {
+      dropped: 0,
+      error: "review JSON has no valid verdict",
+      problems: [`"verdict" must be one of approve, approve_with_comments, or request_changes`],
+    }
   }
   const summary = typeof candidate.summary === "string" ? candidate.summary.trim() : ""
-  if (!summary) return { dropped: 0, error: "review JSON has no summary" }
-  if (!Array.isArray(candidate.findings)) return { dropped: 0, error: "review JSON has no findings array" }
-  const findings: Finding[] = []
-  let dropped = 0
-  for (const entry of candidate.findings) {
-    const finding = normalizeFinding(entry)
-    if (finding) findings.push(finding)
-    else dropped++
+  if (!summary) {
+    return {
+      dropped: 0,
+      error: "review JSON has no summary",
+      problems: [`"summary" must be a non-empty string`],
+    }
   }
-  return { output: { verdict, summary, findings }, dropped }
+  if (!Array.isArray(candidate.findings)) {
+    return {
+      dropped: 0,
+      error: "review JSON has no findings array",
+      problems: [`"findings" must be an array`],
+    }
+  }
+  const findings: Finding[] = []
+  const problems: string[] = []
+  for (let index = 0; index < candidate.findings.length; index++) {
+    const entry = candidate.findings[index]
+    const problem = findingProblem(entry)
+    if (problem) {
+      problems.push(`findings[${index}]: ${problem}`)
+      continue
+    }
+    findings.push(normalizeFinding(entry) as Finding)
+  }
+  return { output: { verdict, summary, findings }, dropped: problems.length, problems }
 }
 
 function textResult(text: string, metadata?: Record<string, unknown>) {
@@ -1232,9 +1301,19 @@ const plugin = Plugin.define({
                 findings: [],
               }
             }
+            const resultFor = (sessionID: string, output: ReviewOutput, dropped: number): ReviewerResult => ({
+              ...base,
+              status: "ok",
+              sessionID,
+              verdict: output.verdict,
+              summary: output.summary,
+              findings: output.findings,
+              droppedFindings: dropped,
+            })
             let lastError: string | undefined
             let failedSession: string | undefined
-            let rescueID: string | undefined
+            let pendingRepair: { sessionID: string; text: string } | undefined
+            let best: ReviewerResult | undefined
             const overallDeadline = Date.now() + REVIEW_TIMEOUT_MS * 2
             for (let attempt = 0; attempt < 3; attempt++) {
               let isRescue = false
@@ -1252,12 +1331,11 @@ const plugin = Plugin.define({
               const startedAt = Date.now()
               try {
                 let promptText: string
-                if (rescueID) {
+                if (pendingRepair) {
                   isRescue = true
-                  sessionID = rescueID
-                  rescueID = undefined
-                  promptText =
-                    "Your previous turn ended before you produced the required JSON. Reply now with ONLY the JSON object, exactly once, with your complete findings based on the analysis you already did. Do not run any more commands or tools, and do not start over."
+                  sessionID = pendingRepair.sessionID
+                  promptText = pendingRepair.text
+                  pendingRepair = undefined
                 } else {
                   const session = await ctx.session.create({
                     parentID: context.sessionID,
@@ -1286,31 +1364,46 @@ const plugin = Plugin.define({
                 const text = turnAssistantText(messages)
                 const parsed = text ? extractJson(text) : undefined
                 const validation = validateReviewOutput(parsed)
-                if (validation.error || !validation.output) {
-                  if (!isRescue && !rescueID) rescueID = sessionID
-                  throw new Error(`no structured output: ${validation.error ?? "unrecognized review payload"}`)
+                if (validation.output && validation.dropped === 0) {
+                  return resultFor(activeSessionID, validation.output, 0)
                 }
-
-                return {
-                  ...base,
-                  status: "ok",
-                  sessionID,
-                  verdict: validation.output.verdict,
-                  summary: validation.output.summary,
-                  findings: validation.output.findings,
-                  droppedFindings: validation.dropped,
+                if (validation.output) {
+                  // Keep the valid part of an otherwise good review, but ask the reviewer
+                  // to repair the invalid findings once before falling back to it.
+                  const candidate = resultFor(activeSessionID, validation.output, validation.dropped)
+                  if (!best || (candidate.droppedFindings ?? 0) < (best.droppedFindings ?? 0)) best = candidate
+                  if (!isRescue && attempt < 2) {
+                    pendingRepair = {
+                      sessionID: activeSessionID,
+                      text: buildRepairPrompt("partial", validation.problems),
+                    }
+                    continue
+                  }
+                  return best ?? candidate
                 }
+                if (!isRescue && attempt < 2) {
+                  pendingRepair = {
+                    sessionID: activeSessionID,
+                    text: buildRepairPrompt(parsed === undefined ? "missing" : "invalid", validation.problems),
+                  }
+                }
+                throw new Error(`no structured output: ${validation.error ?? "unrecognized review payload"}`)
               } catch (error) {
                 lastError = error instanceof Error ? error.message : String(error)
                 if (sessionID) {
                   failedSession = sessionID
                   await ctx.session.interrupt({ sessionID }).catch(() => {})
                   const timedOut = Date.now() - startedAt >= attemptTimeout - 2000
-                  if (!isRescue && !rescueID && timedOut) rescueID = sessionID
+                  if (!isRescue && !pendingRepair && timedOut && attempt < 2) {
+                    pendingRepair = { sessionID, text: buildRepairPrompt("missing", []) }
+                  }
                 }
+                if (best) return best
               }
             }
-            return { ...base, status: "failed", sessionID: failedSession, error: lastError ?? "unreachable", findings: [] }
+            return (
+              best ?? { ...base, status: "failed", sessionID: failedSession, error: lastError ?? "unreachable", findings: [] }
+            )
           }
 
           const results = await Promise.all(reviewers.map((reviewer) => runReviewer(reviewer)))
@@ -1470,6 +1563,7 @@ const plugin = Plugin.define({
                 status: result.status,
                 sessionID: result.sessionID,
                 error: result.error,
+                droppedFindings: result.droppedFindings,
               })),
             })
           } finally {

@@ -140,6 +140,11 @@ the configured reviewer and chair models when it creates their sessions.
 - Each reviewer runs in its own throwaway worktree. If a sandbox cannot be created, that
   reviewer fails with an error instead of falling back to the main checkout. Follow-ups
   are full runs and follow the same rule.
+- Reviewer output is validated against the findings schema. A malformed payload gets a
+  schema-aware repair prompt in the same session, including the exact validation errors;
+  if the repair fails, the reviewer is retried once in a fresh session. Reviews with only
+  some invalid findings are repaired the same way; if the repair fails, the valid findings
+  are kept and the rest are reported as dropped.
 - A follow-up re-runs the full council on the prior target from the same session, with the
   feedback passed to every reviewer. It resolves the target again, so it reviews the
   current state of that target and records a new pinned run. If this session has no prior
@@ -158,7 +163,7 @@ the configured reviewer and chair models when it creates their sessions.
 
 ```sh
 npm ci --legacy-peer-deps   # dev dependencies for tests and typecheck
-npm test                    # 53 tests
+npm test                    # 56 tests
 npm run typecheck
 ```
 

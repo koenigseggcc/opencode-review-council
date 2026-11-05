@@ -797,6 +797,10 @@ test("validateReviewOutput accepts a well-formed review and counts dropped findi
   })
   assert.equal(valid.error, undefined)
   assert.equal(valid.dropped, 3)
+  assert.equal(valid.problems.length, 3)
+  assert.match(valid.problems[0], /findings\[1\]: "detail"/)
+  assert.match(valid.problems[1], /findings\[2\]: must be a JSON object/)
+  assert.match(valid.problems[2], /findings\[3\]: "severity"/)
   assert.equal(valid.output.verdict, "approve_with_comments")
   assert.equal(valid.output.findings.length, 1)
   assert.equal(valid.output.findings[0].line, 77)
@@ -1320,7 +1324,137 @@ test("council run rescues a reviewer that ends a turn without JSON", async () =>
     const reviewers = created.filter((session) => session.agent === "council-reviewer")
     assert.equal(reviewers.length, 3, "the rescue reuses the reviewer session instead of creating a new one")
     const beta = reviewers.find((session) => session.model.id === "beta")
-    assert.ok(prompts.some((prompt) => prompt.sessionID === beta.id && /previous turn ended/.test(prompt.text)))
+    const rescue = prompts.find((prompt) => prompt.sessionID === beta.id && /previous turn ended/.test(prompt.text))
+    assert.ok(rescue, "the reviewer receives a rescue prompt")
+    assert.match(rescue.text, /"verdict"/, "the rescue prompt repeats the schema")
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test("council run repairs a reviewer whose JSON fails schema validation", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "council-repair-"))
+  try {
+    await exec("git", ["init", "-q"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "one\n")
+    await exec("git", ["add", "tracked.txt"], { cwd: repo })
+    await exec("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "two\n")
+
+    const { context, tools, created, prompts } = makeHarness(repo, {
+      reviewText: (session, call) => {
+        if (session.model.id === "beta" && call === 1) {
+          return JSON.stringify({ verdict: "looks good", summary: "beta", findings: [] })
+        }
+        return JSON.stringify(CANNED_REVIEWS[session.model.id])
+      },
+    })
+    await CouncilPlugin.setup(context)
+    const result = await tools.get("council").execute({}, context)
+
+    assert.match(result.output, /3 of 3 reviewers completed/)
+    const betaSessions = created.filter(
+      (session) => session.agent === "council-reviewer" && session.model.id === "beta",
+    )
+    assert.equal(betaSessions.length, 1, "the repair happens in the reviewer's existing session")
+    const repair = prompts.find(
+      (prompt) => prompt.sessionID === betaSessions[0].id && /could not be accepted/.test(prompt.text),
+    )
+    assert.ok(repair, "the reviewer receives a repair prompt")
+    assert.match(repair.text, /"verdict" must be one of/, "the repair prompt names the exact problem")
+    assert.match(repair.text, /"findings"/, "the repair prompt repeats the schema")
+    assert.equal(result.metadata.reviewers.find((reviewer) => reviewer.name === "beta").status, "ok")
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test("council run asks a reviewer to repair invalid findings before dropping them", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "council-repair-findings-"))
+  try {
+    await exec("git", ["init", "-q"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "one\n")
+    await exec("git", ["add", "tracked.txt"], { cwd: repo })
+    await exec("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "two\n")
+
+    const { context, tools, created, prompts } = makeHarness(repo, {
+      reviewText: (session, call) => {
+        if (session.model.id === "beta" && call === 1) {
+          return JSON.stringify({
+            verdict: "approve",
+            summary: "beta",
+            findings: [
+              finding(),
+              { severity: "blocker", file: "a.ts", title: "bad severity", detail: "not a schema severity" },
+            ],
+          })
+        }
+        return JSON.stringify(CANNED_REVIEWS[session.model.id])
+      },
+    })
+    await CouncilPlugin.setup(context)
+    const result = await tools.get("council").execute({}, context)
+
+    assert.match(result.output, /3 of 3 reviewers completed/)
+    const betaSessions = created.filter(
+      (session) => session.agent === "council-reviewer" && session.model.id === "beta",
+    )
+    assert.equal(betaSessions.length, 1, "the repair happens in the reviewer's existing session")
+    const repair = prompts.find(
+      (prompt) => prompt.sessionID === betaSessions[0].id && /were excluded/.test(prompt.text),
+    )
+    assert.ok(repair, "the reviewer is told which findings were excluded")
+    assert.match(repair.text, /findings\[1\]: "severity"/)
+    const betaResult = result.metadata.reviewers.find((reviewer) => reviewer.name === "beta")
+    assert.equal(betaResult.droppedFindings, 0, "the repaired review has no dropped findings")
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test("council run keeps valid findings when a repair attempt fails", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "council-repair-fallback-"))
+  try {
+    await exec("git", ["init", "-q"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "one\n")
+    await exec("git", ["add", "tracked.txt"], { cwd: repo })
+    await exec("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "two\n")
+
+    const { context, tools, created } = makeHarness(repo, {
+      reviewText: (session, call) => {
+        if (session.model.id === "beta" && call === 1) {
+          return JSON.stringify({
+            verdict: "approve",
+            summary: "beta",
+            findings: [finding(), { severity: "blocker", file: "a.ts", title: "bad", detail: "bad" }],
+          })
+        }
+        if (session.model.id === "beta" && call === 2) return "I could not repair the payload."
+        return JSON.stringify(CANNED_REVIEWS[session.model.id])
+      },
+    })
+    await CouncilPlugin.setup(context)
+    const result = await tools.get("council").execute({}, context)
+
+    assert.match(result.output, /3 of 3 reviewers completed/)
+    const betaSessions = created.filter(
+      (session) => session.agent === "council-reviewer" && session.model.id === "beta",
+    )
+    assert.equal(betaSessions.length, 1, "a failed repair does not start another reviewer session")
+    const betaResult = result.metadata.reviewers.find((reviewer) => reviewer.name === "beta")
+    assert.equal(betaResult.status, "ok")
+    assert.equal(betaResult.droppedFindings, 1)
+    const raw = JSON.parse(
+      result.output.match(/## Raw reviewer outputs[\s\S]*?```json\n([\s\S]*?)\n```/)[1],
+    )
+    assert.equal(
+      raw.find((reviewer) => reviewer.name === "beta").findings.length,
+      1,
+      "the valid finding is preserved",
+    )
+    assert.match(result.output, /## Dropped findings/)
   } finally {
     await rm(repo, { recursive: true, force: true })
   }
