@@ -1,0 +1,17 @@
+{
+  "name": "opencode-review-council",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Three-model code-review council plugin for OpenCode",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/council.test.mjs",
+    "typecheck": "tsc --noEmit --strict --skipLibCheck --target es2022 --module esnext --moduleResolution bundler --types node plugins/council.ts"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.5",
+    "@types/node": "^22.10.0",
+    "effect": "4.0.6",
+    "typescript": "^5.7.0"
+  }
+}

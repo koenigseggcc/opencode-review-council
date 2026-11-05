@@ -1,0 +1,8 @@
+{
+  "reviewers": [
+    { "name": "alpha", "label": "Alpha", "model": "test/alpha#max" },
+    { "name": "beta", "label": "Beta", "model": "test/beta#max" },
+    { "name": "gamma", "label": "Gamma", "model": "test/gamma#max" }
+  ],
+  "chair": "test/chair"
+}

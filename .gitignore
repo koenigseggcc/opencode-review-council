@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Installer backups
+.backups/
+
+# Local council model configuration (never commit real model IDs)
+/council.json
+
+# OS noise
+.DS_Store
+
+# Logs
+*.log
