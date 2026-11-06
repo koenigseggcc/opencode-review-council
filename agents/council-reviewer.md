@@ -116,6 +116,8 @@ permission:
     "tree *": allow
     "du *": allow
     "test *": allow
+    "mkdir *": allow
+    "mktemp *": allow
     "rm *": deny
     "mv *": deny
     "chmod *": deny

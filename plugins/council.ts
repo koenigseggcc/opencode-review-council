@@ -1035,8 +1035,80 @@ function validateReviewOutput(raw: unknown): {
   return { output: { verdict, summary, findings }, dropped: problems.length, problems }
 }
 
+function jsonMetadata(value: unknown, path: string, seen: Set<object>): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`textResult metadata must be JSON-safe: ${path} is ${String(value)}`)
+    }
+    return value
+  }
+  if (value === undefined) return undefined
+  if (typeof value === "bigint") {
+    throw new TypeError(`textResult metadata must be JSON-safe: ${path} is a bigint`)
+  }
+  if (typeof value === "function") {
+    throw new TypeError(`textResult metadata must be JSON-safe: ${path} is a function`)
+  }
+  if (typeof value === "symbol") {
+    throw new TypeError(`textResult metadata must be JSON-safe: ${path} is a symbol`)
+  }
+  if (typeof value !== "object") {
+    throw new TypeError(`textResult metadata must be JSON-safe: ${path} is ${typeof value}`)
+  }
+  if (seen.has(value)) {
+    throw new TypeError(`textResult metadata must be JSON-safe: ${path} is circular`)
+  }
+  const array = Array.isArray(value)
+  if (!array) {
+    const proto = Object.getPrototypeOf(value)
+    if (proto !== Object.prototype && proto !== null) {
+      const name = (value as { constructor?: { name?: string } }).constructor?.name ?? "a non-plain object"
+      throw new TypeError(`textResult metadata must be JSON-safe: ${path} is ${name}`)
+    }
+  }
+  seen.add(value)
+  try {
+    if (array) {
+      const result: unknown[] = []
+      for (let index = 0; index < value.length; index++) {
+        // JSON turns undefined array items into null. Do the same explicitly so
+        // the core encoder never sees an undefined array item.
+        const item = jsonMetadata(value[index], `${path}[${index}]`, seen)
+        result.push(item === undefined ? null : item)
+      }
+      return result
+    }
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const sanitized = jsonMetadata(item, `${path}.${key}`, seen)
+      if (sanitized === undefined) continue
+      Object.defineProperty(result, key, {
+        value: sanitized,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
+    }
+    return result
+  } finally {
+    seen.delete(value)
+  }
+}
+
 function textResult(text: string, metadata?: Record<string, unknown>) {
-  return { output: text, content: text, metadata }
+  // Tool metadata is typed as JSON by the core schema, so a nested `undefined`
+  // makes the tool-success encode throw after the call is marked settled. Drop
+  // those keys recursively. Values JSON cannot represent are rejected here with
+  // a clear error instead of being silently coerced or dropped.
+  return {
+    output: text,
+    content: text,
+    metadata:
+      metadata === undefined
+        ? undefined
+        : (jsonMetadata(metadata, "metadata", new Set()) as Record<string, unknown>),
+  }
 }
 
 const plugin = Plugin.define({
@@ -1668,6 +1740,7 @@ if (process.env.COUNCIL_TEST === "1") {
       reviewerName,
       turnAssistantText,
       extractJson,
+      textResult,
       normalizeFinding,
       validateReviewOutput,
       isSecretFile,

@@ -36,6 +36,7 @@ const {
   reviewerName,
   turnAssistantText,
   extractJson,
+  textResult,
   normalizeFinding,
   validateReviewOutput,
   isSecretFile,
@@ -720,6 +721,139 @@ test("extractJson returns undefined for non-JSON text and never throws", () => {
   assert.equal(extractJson("{not json}"), undefined)
   assert.equal(extractJson(""), undefined)
   assert.equal(extractJson("[1,2,3]"), undefined)
+})
+
+test("textResult drops nested undefined metadata so the tool success event encodes", () => {
+  const result = textResult("report", {
+    target: "main...HEAD",
+    reviewers: [
+      { name: "deepseek", status: "ok", sessionID: "ses_1", error: undefined, droppedFindings: 0 },
+      { name: "luna", status: "failed", sessionID: undefined, error: "boom", droppedFindings: undefined },
+    ],
+  })
+  assert.equal(result.output, "report")
+  assert.equal(result.content, "report")
+  assert.deepEqual(result.metadata, {
+    target: "main...HEAD",
+    reviewers: [
+      { name: "deepseek", status: "ok", sessionID: "ses_1", droppedFindings: 0 },
+      { name: "luna", status: "failed", error: "boom" },
+    ],
+  })
+  assert.equal(JSON.stringify(result.metadata).includes("undefined"), false)
+  assert.equal(textResult("report").metadata, undefined)
+})
+
+test("textResult keeps JSON-safe metadata values intact", () => {
+  const result = textResult("report", {
+    string: "",
+    number: 0,
+    negative: -1.5,
+    boolean: false,
+    nil: null,
+    array: [1, "two", null, false, { nested: [] }],
+    object: { deep: { deeper: "value" } },
+  })
+  assert.deepEqual(result.metadata, {
+    string: "",
+    number: 0,
+    negative: -1.5,
+    boolean: false,
+    nil: null,
+    array: [1, "two", null, false, { nested: [] }],
+    object: { deep: { deeper: "value" } },
+  })
+})
+
+test("textResult turns undefined array items into null like JSON", () => {
+  const result = textResult("report", { items: ["a", undefined, { keep: 1, drop: undefined }] })
+  assert.deepEqual(result.metadata, { items: ["a", null, { keep: 1 }] })
+})
+
+test("textResult rejects metadata JSON cannot represent instead of coercing it", () => {
+  assert.throws(() => textResult("report", { bad: Number.NaN }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.bad is NaN",
+  })
+  assert.throws(() => textResult("report", { list: [Number.POSITIVE_INFINITY] }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.list[0] is Infinity",
+  })
+  assert.throws(() => textResult("report", { count: 1n }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.count is a bigint",
+  })
+  assert.throws(() => textResult("report", { callback: () => {} }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.callback is a function",
+  })
+  assert.throws(() => textResult("report", { key: Symbol("k") }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.key is a symbol",
+  })
+  assert.throws(() => textResult("report", { when: new Date(0) }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.when is Date",
+  })
+  assert.throws(() => textResult("report", { lookup: new Map() }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.lookup is Map",
+  })
+  assert.throws(() => textResult("report", { seen: new Set() }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.seen is Set",
+  })
+})
+
+test("textResult rejects circular metadata and explains where the cycle is", () => {
+  const object = { name: "loop" }
+  object.self = object
+  assert.throws(() => textResult("report", { object }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.object.self is circular",
+  })
+
+  const array = []
+  array.push(array)
+  assert.throws(() => textResult("report", { array }), {
+    name: "TypeError",
+    message: "textResult metadata must be JSON-safe: metadata.array[0] is circular",
+  })
+})
+
+test("textResult allows shared references that are not circular", () => {
+  const shared = { name: "same" }
+  const result = textResult("report", { first: shared, second: [shared] })
+  assert.deepEqual(result.metadata, {
+    first: { name: "same" },
+    second: [{ name: "same" }],
+  })
+  assert.notEqual(result.metadata.first, result.metadata.second[0])
+})
+
+test("textResult does not mutate the metadata it is given", () => {
+  const metadata = {
+    target: "main...HEAD",
+    undefinedValue: undefined,
+    items: ["a", undefined],
+    nested: { keep: 1, drop: undefined },
+  }
+  const before = {
+    target: metadata.target,
+    hasUndefined: Object.hasOwn(metadata, "undefinedValue"),
+    items: [metadata.items[0], metadata.items.length],
+    nested: { ...metadata.nested },
+  }
+  textResult("report", metadata)
+  assert.equal(metadata.undefinedValue, undefined)
+  assert.equal(Object.hasOwn(metadata, "undefinedValue"), true)
+  assert.deepEqual(metadata.items, ["a", undefined])
+  assert.deepEqual(metadata.nested, { keep: 1, drop: undefined })
+  assert.deepEqual(
+    { target: metadata.target, hasUndefined: before.hasUndefined },
+    { target: "main...HEAD", hasUndefined: true },
+  )
+  assert.deepEqual(before.items, ["a", 2])
 })
 
 test("turnAssistantText returns the last assistant text within the current turn", () => {
@@ -1787,6 +1921,8 @@ test("council reviewer can build and run tests but cannot install or destroy", a
     "poetry run pytest",
     "bundle exec rake test",
     "./.venv/bin/pytest",
+    "mkdir -p .review-tmp",
+    "mktemp -d .review-tmp.XXXXXX",
   ]) {
     assert.equal(bashPermissionEffect(rules, command), "allow", command)
   }
