@@ -7,6 +7,8 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { Schema } from "effect"
+import { SessionEvent } from "@opencode/schema/session-event"
 
 process.env.COUNCIL_TEST = "1"
 process.env.OPENCODE_COUNCIL_CONFIG = fileURLToPath(new URL("./fixtures/council.json", import.meta.url))
@@ -742,6 +744,26 @@ test("textResult drops nested undefined metadata so the tool success event encod
   })
   assert.equal(JSON.stringify(result.metadata).includes("undefined"), false)
   assert.equal(textResult("report").metadata, undefined)
+})
+
+test("textResult metadata encodes through the core tool-success schema", () => {
+  const metadata = {
+    target: "main...HEAD",
+    reviewers: [
+      { name: "deepseek", status: "ok", sessionID: "ses_1", error: undefined, droppedFindings: 0 },
+      { name: "luna", status: "failed", sessionID: undefined, error: "boom", droppedFindings: undefined },
+    ],
+  }
+  const schema = SessionEvent.Tool.Success.fields.data.fields.metadata
+  assert.throws(() => Schema.encodeSync(schema)(metadata), /Expected JSON value/)
+  const result = textResult("report", metadata)
+  assert.deepEqual(Schema.encodeSync(schema)(result.metadata), {
+    target: "main...HEAD",
+    reviewers: [
+      { name: "deepseek", status: "ok", sessionID: "ses_1", droppedFindings: 0 },
+      { name: "luna", status: "failed", error: "boom" },
+    ],
+  })
 })
 
 test("textResult keeps JSON-safe metadata values intact", () => {

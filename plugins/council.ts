@@ -1097,10 +1097,11 @@ function jsonMetadata(value: unknown, path: string, seen: Set<object>): unknown 
 }
 
 function textResult(text: string, metadata?: Record<string, unknown>) {
-  // Tool metadata is typed as JSON by the core schema, so a nested `undefined`
-  // makes the tool-success encode throw after the call is marked settled. Drop
-  // those keys recursively. Values JSON cannot represent are rejected here with
-  // a clear error instead of being silently coerced or dropped.
+  // Tool metadata is typed as JSON by the core schema. Nested `undefined`
+  // values have produced lost tool results in practice (the model sees
+  // "Tool result missing"), so normalize metadata to strict JSON before
+  // returning it. Values JSON cannot represent are rejected with a path-qualified
+  // error instead of being silently coerced or dropped.
   return {
     output: text,
     content: text,
