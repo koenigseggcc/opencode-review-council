@@ -111,6 +111,28 @@ installed by `scripts/install.sh`; create it yourself:
 - `model` and `chair` are OpenCode model references: `provider/model` or
   `provider/model#variant`.
 
+### Reasoning summaries
+
+A model reference can include an OpenCode variant. For example, this variant keeps maximum
+reasoning effort while asking the provider for a readable reasoning summary, which is useful
+when inspecting a reviewer's decision process:
+
+```json
+"variants": {
+  "max-summary": {
+    "reasoningEffort": "max",
+    "reasoningSummary": "auto",
+    "include": ["reasoning.encrypted_content"]
+  }
+}
+```
+
+Define it under `provider.<provider>.models.<model>.variants` in your OpenCode
+configuration, then reference it as `provider/model#max-summary`. `reasoningSummary` asks
+for the readable summary, while `include` returns encrypted reasoning content that can be
+carried across turns. The provider must support reasoning summaries, and the extra output
+can add tokens and latency.
+
 Exactly three reviewers are required, and reviewer names and codes must be unique.
 The plugin resolves the config in this order:
 
