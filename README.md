@@ -194,7 +194,7 @@ the configured reviewer and chair models when it creates their sessions.
 
 ```sh
 npm ci --legacy-peer-deps   # dev dependencies for tests and typecheck
-npm test                    # 65 tests
+npm test                    # 66 tests
 npm run typecheck
 ```
 

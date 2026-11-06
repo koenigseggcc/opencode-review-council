@@ -766,6 +766,15 @@ test("textResult metadata encodes through the core tool-success schema", () => {
   })
 })
 
+test("textResult array metadata encodes through the core tool-success schema", () => {
+  const metadata = { items: ["a", undefined, { keep: 1, drop: undefined }] }
+  const schema = SessionEvent.Tool.Success.fields.data.fields.metadata
+  assert.throws(() => Schema.encodeSync(schema)(metadata), /Expected JSON value/)
+  assert.deepEqual(Schema.encodeSync(schema)(textResult("report", metadata).metadata), {
+    items: ["a", null, { keep: 1 }],
+  })
+})
+
 test("textResult keeps JSON-safe metadata values intact", () => {
   const result = textResult("report", {
     string: "",
