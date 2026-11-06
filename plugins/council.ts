@@ -1267,7 +1267,7 @@ const plugin = Plugin.define({
 
           const buildBrief = (sandbox: Sandbox) =>
             [
-              "This change is in review. Evaluate it, looking for issues, and report back. Don't make any changes. If you decide to run any tests, ensure they do not collide with other review sessions.",
+              "This change is in review. Evaluate it, looking for issues, and report back. Don't make any source changes. If you decide to run any tests, ensure they do not collide with other review sessions.",
               "",
               `Review target: ${label}`,
               `Patch file: ${patchPath} — read it first; it is the diff under review.`,
@@ -1276,7 +1276,7 @@ const plugin = Plugin.define({
               patchNote || undefined,
               "",
               "Read the patch and surrounding code before judging.",
-              `Run the project's existing tests if useful (shell tool with workdir ${sandbox.dir}, or cd into it). Do not create, edit, or delete files — run tests as-is, and cite the command and observed result in the finding detail.`,
+              `Build and run the project's tests when useful (shell tool with workdir ${sandbox.dir}, or cd into it). Prefer the project's own entry points, such as npm test, make test, ./gradlew test, pytest, or a checked-in runner like bash test/service/run.sh. Do not install or download dependencies; a checked-in runner may provision its own pinned tools. If you need environment variables, export them in a separate statement (export FOO=bar; npm test) rather than prefixing the command. Do not create, edit, or delete source files — run tests as-is; build artifacts and test temp files inside the sandbox are fine. Cite the command and observed result in the finding detail.`,
               "Work efficiently: run the project's test suite at most twice, and never re-run a command whose output you already have or has not changed — if a command keeps producing the same result, stop and use it.",
               "Keep your final analysis concise: emit the JSON as soon as your findings are ready — a turn that exhausts the thinking budget before producing it wastes the review.",
               "Environment: macOS with BSD userland — avoid GNU-only flags and escapes (e.g. sed \\x1b, grep -P, find -printf); they fail or silently do nothing here.",

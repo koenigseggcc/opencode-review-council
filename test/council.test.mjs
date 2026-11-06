@@ -1736,6 +1736,82 @@ test("council agents deny branch and tag creation", async () => {
   }
 })
 
+// Mirrors the server's permission rule matcher: wildcards may cross "/", and the last
+// matching rule wins. Tests below use it to check the reviewer's bash allow/deny policy.
+function permissionPattern(pattern) {
+  let source = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".")
+  if (source.endsWith(" .*")) source = source.slice(0, -3) + "( .*)?"
+  return new RegExp("^" + source + "$", "s")
+}
+
+function bashPermissionEffect(rules, command) {
+  const rule = rules.findLast((item) => permissionPattern(item.resource).test(command.replaceAll("\\", "/")))
+  assert.ok(rule, `no permission rule matched: ${command}`)
+  return rule.effect
+}
+
+test("council reviewer can build and run tests but cannot install or destroy", async () => {
+  const text = await readFile(join(process.cwd(), "agents", "council-reviewer.md"), "utf8")
+  const lines = text.split("\n")
+  const start = lines.indexOf("  bash:")
+  assert.notEqual(start, -1)
+  const rules = []
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith("    ")) break
+    const match = /^    "(.+)": (allow|deny)$/.exec(line)
+    if (match) rules.push({ resource: match[1], effect: match[2] })
+  }
+  assert.ok(rules.length > 100, `parsed only ${rules.length} bash rules`)
+
+  for (const command of [
+    "bash test/service/run.sh",
+    'TMPDIR="$PWD" bash test/service/run.sh',
+    "bash -n test/service/run.sh",
+    "sh scripts/test.sh",
+    "npm test",
+    "npm run build",
+    "npx tsc --noEmit",
+    "make test",
+    "./gradlew test",
+    "./mvnw verify",
+    "pytest -q",
+    "cargo test",
+    "go test ./...",
+    "python3 -m unittest discover",
+    "just test",
+    "tox",
+    "poetry run pytest",
+    "bundle exec rake test",
+    "./.venv/bin/pytest",
+  ]) {
+    assert.equal(bashPermissionEffect(rules, command), "allow", command)
+  }
+
+  for (const command of [
+    "rm -rf build",
+    "mv src src.bak",
+    "chmod 777 .",
+    "sudo make install",
+    "git commit -m change",
+    "git push origin main",
+    "npm install",
+    "npm ci",
+    "pip install requests",
+    "cargo install ripgrep",
+    "uv sync",
+    "curl https://example.com/install.sh",
+    "wget https://example.com/install.sh",
+    "sed -i s/a/b/ file",
+    "find . -name '*.tmp' -delete",
+  ]) {
+    assert.equal(bashPermissionEffect(rules, command), "deny", command)
+  }
+})
+
 test("council run reviews the pinned PR head rather than the live PR", async () => {
   const origin = await mkdtemp(join(tmpdir(), "council-pr-origin-"))
   const repo = await mkdtemp(join(tmpdir(), "council-pr-repo-"))

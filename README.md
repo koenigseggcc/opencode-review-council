@@ -158,6 +158,9 @@ the configured reviewer and chair models when it creates their sessions.
 - The last run's target is recorded per session under `.git/opencode-council/sessions/`.
   Records unused for 30 days are pruned at the next council run. The latest full patch is
   kept in `.git/opencode-council/` for inspection; older patches are pruned at the next run.
+- Reviewers may build and run the project's tests, including checked-in shell runners such
+  as `bash test/service/run.sh`. Dependency installs and direct downloads are denied by the
+  reviewer permission list; a project's own test runner may provision pinned tools itself.
 - Reviewer permission lists are guardrails, not a security boundary. Reviewers run with
   your user privileges in a git worktree sandbox, and the reviewed content is untrusted
   input: prompt injection in a diff could lead to code execution. Do not point the
@@ -169,7 +172,7 @@ the configured reviewer and chair models when it creates their sessions.
 
 ```sh
 npm ci --legacy-peer-deps   # dev dependencies for tests and typecheck
-npm test                    # 56 tests
+npm test                    # 57 tests
 npm run typecheck
 ```
 
