@@ -1290,6 +1290,7 @@ const plugin = Plugin.define({
               .filter((line): line is string => line !== undefined)
               .join("\n")
 
+          const reviewerSessionIDs = new Set<string>()
           const runReviewer = async (reviewer: ReviewerConfig): Promise<ReviewerResult> => {
             const base = { name: reviewer.name, label: reviewer.label, code: reviewer.code }
             const sandbox = sandboxes.get(reviewer.name)
@@ -1351,6 +1352,7 @@ const plugin = Plugin.define({
                 }
 
                 const activeSessionID = sessionID
+                reviewerSessionIDs.add(activeSessionID)
                 await ctx.session.prompt({ sessionID: activeSessionID, text: promptText }, { signal: context.signal })
                 await promptWithTimeout(
                   (timeoutSignal) =>
@@ -1567,6 +1569,14 @@ const plugin = Plugin.define({
               })),
             })
           } finally {
+            // A reviewer session whose location is a sandbox keeps pointing at the
+            // deleted worktree after cleanup, which breaks the next location reload.
+            // Move it back to the reviewed checkout before removing the sandbox.
+            for (const sessionID of reviewerSessionIDs) {
+              await ctx.session
+                .move({ sessionID, directory: cwd as Location.Info["directory"] })
+                .catch(() => {})
+            }
             for (const reviewer of reviewers) await removeSandbox(sh, repoRoot, sandboxes.get(reviewer.name))
             await clearActiveMarker(stateRoot, runId)
           }

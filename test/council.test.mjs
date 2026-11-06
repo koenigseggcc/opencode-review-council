@@ -1132,6 +1132,7 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     const tools = new Map()
     const created = []
     const prompts = []
+    const moves = []
     const canned = CANNED_REVIEWS
     const context = {
       agent: "build",
@@ -1157,7 +1158,9 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
         },
         wait: async () => {},
         interrupt: async () => {},
-        move: async () => {},
+        move: async (input) => {
+          moves.push(input)
+        },
         context: async (input) => {
           const owner = created.find((session) => session.id === input.sessionID)
           if (!owner || owner.agent === "council-chair") {
@@ -1208,6 +1211,15 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     const worktrees = join(realpathSync(await stateRootFor(makeShell(), repo)), "opencode-council", "worktrees")
     const leftover = existsSync(worktrees) ? readdirSync(worktrees) : []
     assert.deepEqual(leftover, [], "sandboxes are removed after the run")
+    assert.deepEqual(
+      moves.map((move) => move.sessionID).sort(),
+      reviewerSessions.map((session) => session.id).sort(),
+      "reviewer sessions are moved out of their sandboxes before cleanup",
+    )
+    assert.ok(
+      moves.every((move) => move.directory === repo),
+      "reviewer sessions move to the reviewed checkout",
+    )
   } finally {
     await rm(repo, { recursive: true, force: true })
   }
@@ -1599,7 +1611,16 @@ test("council_followup re-runs the full council on the same target with the feed
     assert.ok(chair)
     const chairPrompt = follow.prompts.find((entry) => entry.sessionID === chair.id)
     assert.ok(chairPrompt && chairPrompt.text.includes(feedback), "the chair also sees the feedback")
-    assert.equal(follow.moves.length, 0, "follow-ups create new sessions in their sandboxes")
+    assert.equal(follow.moves.length, 3, "follow-up reviewer sessions are moved out of their sandboxes")
+    assert.deepEqual(
+      follow.moves.map((move) => move.sessionID).sort(),
+      reviewers.map((session) => session.id).sort(),
+      "every follow-up reviewer session is relocated",
+    )
+    assert.ok(
+      follow.moves.every((move) => move.directory === repo),
+      "follow-up reviewer sessions move to the reviewed checkout",
+    )
 
     const empty = await follow.tools.get("council_followup").execute({ feedback: "   " }, follow.context)
     assert.match(empty.output, /feedback cannot be empty/)

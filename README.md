@@ -42,8 +42,11 @@ scripts/install.sh --config-dir /path/to/opencode-config
 
 `OPENCODE_CONFIG_DIR` and `XDG_CONFIG_HOME` are respected. Files that already exist are
 backed up under `<config-dir>/.backups/opencode-review-council-<timestamp>/` before being
-replaced. OpenCode reloads configuration automatically; run `/reload` in the TUI to
-force a reload.
+replaced. After installing or editing `plugins/council.ts`, restart the OpenCode
+background service (`opencode service restart`) so the server imports the new module.
+A running service keeps the plugin module it first loaded: `opencode reload` re-reads
+configuration, and `/reload` in the TUI forces that reload, but neither re-evaluates an
+already-imported plugin file.
 
 Then create your council model configuration (see [Configuration](#configuration)). The
 installer never writes or overwrites it.
@@ -145,6 +148,9 @@ the configured reviewer and chair models when it creates their sessions.
   if the repair fails, the reviewer is retried once in a fresh session. Reviews with only
   some invalid findings are repaired the same way; if the repair fails, the valid findings
   are kept and the rest are reported as dropped.
+- Before a reviewer's sandbox is removed, its session is moved to the reviewed checkout.
+  This keeps saved sessions from pointing at a deleted worktree, which would otherwise
+  fail the next location reload.
 - A follow-up re-runs the full council on the prior target from the same session, with the
   feedback passed to every reviewer. It resolves the target again, so it reviews the
   current state of that target and records a new pinned run. If this session has no prior
@@ -177,8 +183,10 @@ test/                 node:test suite
 scripts/              install, uninstall, secret scan
 ```
 
-With `--link`, the installed files point back into this checkout, so changes here apply
-to OpenCode directly. With a copy install, re-run `scripts/install.sh` after changes.
+With `--link`, the installed files point back into this checkout. Restart the background
+service after editing `plugins/council.ts` so the new module is evaluated; configuration
+changes such as `council.json` apply to the next run without a restart. With a copy
+install, re-run `scripts/install.sh` after changes.
 
 ## License
 
