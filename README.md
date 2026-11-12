@@ -3,8 +3,8 @@
 A three-model code-review council plugin for [OpenCode](https://opencode.ai) V2.
 
 The council tool convenes three independent reviewers, each in its own throwaway git
-worktree with the change applied. They can run tests and cross-reference other
-repositories, then return structured findings. A chair model merges the three reviews
+worktree with the change applied. They can run tests and read configured cross-reference
+roots, then return structured findings. A chair model merges the three reviews
 into a report with a consensus matrix (unanimous / majority / single-reviewer findings)
 and a prioritized action list. Give the council further feedback after a report and it
 re-runs all three reviewers on the same target.
@@ -18,8 +18,8 @@ re-runs all three reviewers on the same target.
 ## Install
 
 ```sh
-git clone <your-fork-url> ~/code/opencode-review-council
-~/code/opencode-review-council/scripts/install.sh
+git clone <your-fork-url> /path/to/opencode-review-council
+/path/to/opencode-review-council/scripts/install.sh
 ```
 
 The installer copies the plugin, agents, and the `/council` command into your OpenCode
@@ -54,7 +54,7 @@ installer never writes or overwrites it.
 ## Uninstall
 
 ```sh
-~/code/opencode-review-council/scripts/uninstall.sh
+/path/to/opencode-review-council/scripts/uninstall.sh
 ```
 
 The uninstaller removes only the files this repository installs. Symlinks into this
@@ -89,12 +89,13 @@ new run.
 
 ## Configuration
 
-The plugin reads the reviewer and chair models from a local JSON file, by default
-`~/.config/opencode/council.json`. The file is not part of this repository and is not
-installed by `scripts/install.sh`; create it yourself:
+The plugin reads its reviewer, chair, and cross-reference configuration from a local JSON
+file, by default `~/.config/opencode/council.json`. The file is not part of this repository
+and is not installed by `scripts/install.sh`; create it yourself:
 
 ```json
 {
+  "crossReferenceRoots": ["~/repos", "/Volumes/work/repos"],
   "reviewers": [
     { "name": "alpha", "label": "Alpha", "code": "A", "model": "provider/model-a#variant" },
     { "name": "beta", "label": "Beta", "code": "B", "model": "provider/model-b#variant" },
@@ -110,6 +111,11 @@ installed by `scripts/install.sh`; create it yourself:
   character of `name`, uppercased.
 - `model` and `chair` are OpenCode model references: `provider/model` or
   `provider/model#variant`.
+- `crossReferenceRoots` is an optional list of directories that reviewers and the chair
+  may read (read-only) for callers, conventions, or related implementations. Paths must be
+  absolute or use `~`/`~/` for the home directory; the plugin expands `~`, rejects the
+  filesystem root, and rejects wildcard characters. The list defaults to empty, so no
+  directories outside the reviewed checkout are readable.
 
 ### Reasoning summaries
 
@@ -183,6 +189,9 @@ the configured reviewer and chair models when it creates their sessions.
 - Reviewers may build and run the project's tests, including checked-in shell runners such
   as `bash test/service/run.sh`. Dependency installs and direct downloads are denied by the
   reviewer permission list; a project's own test runner may provision pinned tools itself.
+- Reviewers and the chair may read files under the configured `crossReferenceRoots`
+  (read-only); no other external directories are pre-approved. Edits and destructive
+  commands remain denied by the agent permission lists.
 - Reviewer permission lists are guardrails, not a security boundary. Reviewers run with
   your user privileges in a git worktree sandbox, and the reviewed content is untrusted
   input: prompt injection in a diff could lead to code execution. Do not point the
@@ -194,7 +203,7 @@ the configured reviewer and chair models when it creates their sessions.
 
 ```sh
 npm ci --legacy-peer-deps   # dev dependencies for tests and typecheck
-npm test                    # 66 tests
+npm test                    # 67 tests
 npm run typecheck
 ```
 

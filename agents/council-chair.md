@@ -7,7 +7,6 @@ permission:
   task: deny
   external_directory:
     "*": ask
-    "~/code/**": allow
   bash:
     "*": deny
     "git *": allow
@@ -67,4 +66,4 @@ Write the final council report in markdown:
 - Add a "Disagreements & uncertainty" section if reviewers contradict each other or flagged low confidence.
 - Add a "Reviewer failures" note if any reviewer failed.
 - Close with a prioritized action list: what to fix first.
-You may read the patch, the sandbox checkout, the repository, and other repositories under ~/code for context, but never invent findings that are not in the inputs.
+You may read the patch, the sandbox checkout, the repository, and any cross-reference roots named in your brief for context, but never invent findings that are not in the inputs.

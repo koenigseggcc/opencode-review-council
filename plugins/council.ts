@@ -5,7 +5,7 @@ import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 type ShResult = { exitCode: number; stdout: string; stderr: string }
 
@@ -205,6 +205,8 @@ type ReviewerConfig = {
 type CouncilConfig = {
   reviewers: ReviewerConfig[]
   chair: Model.Ref
+  /** Directories outside the reviewed checkout that reviewers and the chair may read. */
+  crossReferenceRoots: string[]
 }
 
 function expandHome(path: string): string {
@@ -234,6 +236,21 @@ function configModel(value: unknown, field: string): Model.Ref {
   } catch {
     throw new Error(`${field} must be a model reference like "provider/model" or "provider/model#variant"`)
   }
+}
+
+function configRoots(value: unknown): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new Error(`"crossReferenceRoots" must be an array of directory paths`)
+  const roots = value.map((entry, index): string => {
+    const field = `crossReferenceRoots[${index}]`
+    const expanded = expandHome(configString(entry, field))
+    if (!isAbsolute(expanded)) throw new Error(`${field} must be an absolute path or use "~" for the home directory`)
+    const root = resolve(expanded)
+    if (dirname(root) === root) throw new Error(`${field} must not be the filesystem root`)
+    if (/[*?]/.test(root)) throw new Error(`${field} must be a directory path without wildcard characters`)
+    return root
+  })
+  return [...new Set(roots)]
 }
 
 async function loadCouncilConfig(): Promise<{ config: CouncilConfig; path: string } | { error: string }> {
@@ -288,7 +305,8 @@ async function loadCouncilConfig(): Promise<{ config: CouncilConfig; path: strin
     }
 
     const chair = configModel(body.chair, "chair")
-    return { config: { reviewers, chair }, path }
+    const crossReferenceRoots = configRoots(body.crossReferenceRoots)
+    return { config: { reviewers, chair, crossReferenceRoots }, path }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     return { error: `Council aborted: invalid council model configuration at ${path}: ${reason}.` }
@@ -1131,7 +1149,7 @@ const plugin = Plugin.define({
         name: "council",
         options: { codemode: false },
         description:
-          "Convene a three-model code-review council. Each reviewer runs in its own isolated session with its own private throwaway sandbox checkout of the change; they can run tests and cross-reference other repositories under ~/code, then return findings that a chair merges into a consensus report. Use for reviewing a working-tree diff, a branch or commit range, a PR, or specific paths.",
+          "Convene a three-model code-review council. Each reviewer runs in its own isolated session with its own private throwaway sandbox checkout of the change; they can run tests and read the cross-reference roots configured for the council, then return findings that a chair merges into a consensus report. Use for reviewing a working-tree diff, a branch or commit range, a PR, or specific paths.",
         input: Schema.Struct({
           request: Schema.optionalKey(
             Schema.String.annotate({
@@ -1157,7 +1175,12 @@ const plugin = Plugin.define({
 
           const loaded = await loadCouncilConfig()
           if ("error" in loaded) return textResult(loaded.error)
-          const { reviewers, chair } = loaded.config
+          const { reviewers, chair, crossReferenceRoots } = loaded.config
+          const crossReferencePermissions = crossReferenceRoots.map((root) => ({
+            action: "external_directory",
+            resource: `${root}/*`,
+            effect: "allow" as const,
+          }))
 
           const sh = makeShell(context.signal)
           const { cwd, repoRoot } = await resolveRoots(sh, context.sessionID)
@@ -1354,7 +1377,9 @@ const plugin = Plugin.define({
               "Keep your final analysis concise: emit the JSON as soon as your findings are ready — a turn that exhausts the thinking budget before producing it wastes the review.",
               "Environment: macOS with BSD userland — avoid GNU-only flags and escapes (e.g. sed \\x1b, grep -P, find -printf); they fail or silently do nothing here.",
               `Never modify the main checkout at ${repoRoot}.`,
-              "You may read other repositories under ~/code (read-only) for callers, conventions, or related implementations.",
+              crossReferenceRoots.length
+                ? `You may read other repositories under these configured cross-reference roots (read-only) for callers, conventions, or related implementations: ${crossReferenceRoots.join(", ")}.`
+                : undefined,
               "",
               "FINISHING REQUIREMENT: end your turn with your complete findings as a single JSON object (verdict, summary, findings). Your final message must contain only that JSON object — no prose, no markdown fences, no tool calls.",
               "The JSON object must match this schema:",
@@ -1419,6 +1444,7 @@ const plugin = Plugin.define({
                     location: {
                       directory: sandbox.dir as Location.Info["directory"],
                     },
+                    permissions: crossReferencePermissions,
                   })
                   sessionID = session.id
                   promptText = buildBrief(sandbox)
@@ -1544,6 +1570,9 @@ const plugin = Plugin.define({
                 return sandbox ? `${reviewer.label} sandbox: ${sandbox.dir}` : undefined
               }),
               focus ? `Focus requested: ${focus}` : undefined,
+              crossReferenceRoots.length
+                ? `Cross-reference roots (read-only): ${crossReferenceRoots.join(", ")}`
+                : undefined,
               "",
               "Consensus matrix (computed deterministically from the three reviews; ground truth):",
               matrix,
@@ -1568,6 +1597,7 @@ const plugin = Plugin.define({
                 agent: "council-chair",
                 model: chair,
                 location: { directory: cwd },
+                permissions: crossReferencePermissions,
               })
               chairID = chairSession.id
               const activeChairID = chairID

@@ -1,4 +1,5 @@
 {
+  "crossReferenceRoots": ["~/council-reference"],
   "reviewers": [
     { "name": "alpha", "label": "Alpha", "model": "test/alpha#max" },
     { "name": "beta", "label": "Beta", "model": "test/beta#max" },

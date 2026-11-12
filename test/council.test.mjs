@@ -523,6 +523,35 @@ test("loadCouncilConfig parses reviewers and applies label and code defaults", a
     assert.equal(loaded.config.chair.providerID, "test")
     assert.equal(loaded.config.chair.id, "chair")
     assert.equal(loaded.config.chair.variant, "max")
+    assert.deepEqual(loaded.config.crossReferenceRoots, [])
+  } finally {
+    restore()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("loadCouncilConfig expands and deduplicates cross-reference roots", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "council-config-roots-"))
+  const path = join(dir, "council.json")
+  const restore = setEnv("OPENCODE_COUNCIL_CONFIG", path)
+  try {
+    const absolute = join(tmpdir(), "council-references")
+    await writeFile(
+      path,
+      JSON.stringify({
+        crossReferenceRoots: ["~/reference", `${absolute}/`, "~/reference/"],
+        reviewers: [
+          { name: "one", code: "1", model: "test/one" },
+          { name: "two", code: "2", model: "test/two" },
+          { name: "three", code: "3", model: "test/three" },
+        ],
+        chair: "test/chair",
+      }),
+    )
+
+    const loaded = await loadCouncilConfig()
+    if ("error" in loaded) assert.fail(loaded.error)
+    assert.deepEqual(loaded.config.crossReferenceRoots, [join(homedir(), "reference"), absolute])
   } finally {
     restore()
     await rm(dir, { recursive: true, force: true })
@@ -558,6 +587,17 @@ test("loadCouncilConfig rejects missing and invalid configurations", async () =>
       [{ ...valid, reviewers: [valid.reviewers[0], { ...valid.reviewers[1], code: "AB" }, valid.reviewers[2]] }, /single letter or digit/],
       [{ ...valid, reviewers: [valid.reviewers[0], { ...valid.reviewers[1], model: "not-a-model" }, valid.reviewers[2]] }, /model reference/],
       [{ ...valid, chair: 42 }, /chair must be a non-empty string/],
+      [{ ...valid, crossReferenceRoots: "~/repos" }, /"crossReferenceRoots" must be an array/],
+      [{ ...valid, crossReferenceRoots: [""] }, /crossReferenceRoots\[0\] must be a non-empty string/],
+      [
+        { ...valid, crossReferenceRoots: ["relative/path"] },
+        /crossReferenceRoots\[0\] must be an absolute path or use "~" for the home directory/,
+      ],
+      [{ ...valid, crossReferenceRoots: ["/"] }, /crossReferenceRoots\[0\] must not be the filesystem root/],
+      [
+        { ...valid, crossReferenceRoots: ["~/repos/*"] },
+        /crossReferenceRoots\[0\] must be a directory path without wildcard characters/,
+      ],
     ]
     for (const [config, expected] of cases) {
       await writeFile(path, JSON.stringify(config))
@@ -1365,6 +1405,17 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     const chairSession = created.find((session) => session.agent === "council-chair")
     assert.ok(chairSession, "the chair session is created")
     assert.equal(chairSession.model.id, "chair", "the chair session gets the configured model")
+    const referenceRoot = join(homedir(), "council-reference")
+    const crossReferencePermissions = [
+      { action: "external_directory", resource: `${referenceRoot}/*`, effect: "allow" },
+    ]
+    for (const session of [...reviewerSessions, chairSession]) {
+      assert.deepEqual(
+        session.permissions,
+        crossReferencePermissions,
+        "reviewer and chair sessions may read the configured cross-reference roots",
+      )
+    }
     for (const session of reviewerSessions) {
       assert.ok(session.location?.directory, "reviewer session is bound to a directory")
       assert.notEqual(session.location.directory, repo, "reviewer session runs in its sandbox, not the checkout")
@@ -1372,6 +1423,9 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     }
     const brief = prompts.find((prompt) => prompt.sessionID === reviewerSessions[0].id).text
     assert.match(brief, /Sandbox checkout: /)
+    assert.ok(brief.includes(referenceRoot), "the reviewer brief names the configured cross-reference root")
+    const chairBrief = prompts.find((prompt) => prompt.sessionID === chairSession.id).text
+    assert.ok(chairBrief.includes(referenceRoot), "the chair brief names the configured cross-reference root")
 
     const worktrees = join(realpathSync(await stateRootFor(makeShell(), repo)), "opencode-council", "worktrees")
     const leftover = existsSync(worktrees) ? readdirSync(worktrees) : []
