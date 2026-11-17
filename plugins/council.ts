@@ -313,7 +313,10 @@ async function loadCouncilConfig(): Promise<{ config: CouncilConfig; path: strin
   }
 }
 
-const REVIEW_TIMEOUT_MS = 15 * 60 * 1000
+/** Per-attempt reviewer budget; a stalled reviewer may retry in a second window. */
+const REVIEWER_TIMEOUT_MS = 40 * 60 * 1000
+const REVIEWER_DEADLINE_MS = REVIEWER_TIMEOUT_MS * 2
+const CHAIR_TIMEOUT_MS = 15 * 60 * 1000
 const RUN_STALE_MS = 90 * 60 * 1000
 const SANDBOX_GRACE_MS = 15 * 60 * 1000
 /** Session follow-up records expire after this long without a council run. */
@@ -1413,7 +1416,7 @@ const plugin = Plugin.define({
             let failedSession: string | undefined
             let pendingRepair: { sessionID: string; text: string } | undefined
             let best: ReviewerResult | undefined
-            const overallDeadline = Date.now() + REVIEW_TIMEOUT_MS * 2
+            const overallDeadline = Date.now() + REVIEWER_DEADLINE_MS
             for (let attempt = 0; attempt < 3; attempt++) {
               let isRescue = false
               let sessionID: string | undefined
@@ -1426,7 +1429,7 @@ const plugin = Plugin.define({
                 lastError = "cancelled"
                 break
               }
-              const attemptTimeout = Math.min(REVIEW_TIMEOUT_MS, remaining)
+              const attemptTimeout = Math.min(REVIEWER_TIMEOUT_MS, remaining)
               const startedAt = Date.now()
               try {
                 let promptText: string
@@ -1615,7 +1618,7 @@ const plugin = Plugin.define({
                         { sessionID: activeChairID },
                         { signal: AbortSignal.any([context.signal, timeoutSignal]) },
                       ),
-                    REVIEW_TIMEOUT_MS,
+                    CHAIR_TIMEOUT_MS,
                   )
                   const messages = await ctx.session.context({ sessionID: activeChairID }, { signal: context.signal })
                   const text = turnAssistantText(messages)
