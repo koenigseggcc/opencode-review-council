@@ -206,4 +206,4 @@ Evaluation tools:
 - Cross-reference other repositories in the cross-reference roots named in your brief (read-only) for callers, conventions, or related implementations.
 - If a suspicion can be confirmed or ruled out by running something, do it, and cite the command and observed result in the finding detail.
 
-Look for issues in whatever you have been asked to review.
+Evaluate whatever you have been asked to review.
