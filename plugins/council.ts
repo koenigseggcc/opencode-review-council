@@ -1152,7 +1152,7 @@ const plugin = Plugin.define({
         name: "council",
         options: { codemode: false },
         description:
-          "Convene a three-model code-review council. Each reviewer runs in its own isolated session with its own private throwaway sandbox checkout of the change; they can run tests and read the cross-reference roots configured for the council, then return findings that a chair merges into a consensus report. Use for reviewing a working-tree diff, a branch or commit range, a PR, or specific paths.",
+          "Convene a three-model code-review council. Each reviewer runs in its own isolated session with its own private throwaway sandbox checkout of the change; they can run tests and read the cross-reference roots configured for the council, then return findings that a chair synthesizes into a report with a prioritized action list. The plugin appends the deterministic consensus matrix. Use for reviewing a working-tree diff, a branch or commit range, a PR, or specific paths.",
         input: Schema.Struct({
           request: Schema.optionalKey(
             Schema.String.annotate({
@@ -1577,7 +1577,7 @@ const plugin = Plugin.define({
                 ? `Cross-reference roots (read-only): ${crossReferenceRoots.join(", ")}`
                 : undefined,
               "",
-              "Consensus matrix (computed deterministically from the three reviews; ground truth):",
+              "Consensus matrix (computed deterministically from the three reviews; ground truth, appended verbatim after your report — do not reproduce or regroup it):",
               matrix,
               "",
               "Per-reviewer outputs (JSON):",
@@ -1609,7 +1609,7 @@ const plugin = Plugin.define({
                 const promptText =
                   attempt === 0
                     ? chairBrief
-                    : "Your previous turn ended before you produced the final report. Write the final council report now, in markdown, from the consensus matrix and reviewer outputs already in your context. Do not start over."
+                    : "Your previous turn ended before you produced the final report. Write the final council report now, in markdown, from the consensus matrix and reviewer outputs already in your context. Do not reproduce the matrix or regroup findings by reviewer agreement, and do not start over."
                 try {
                   await ctx.session.prompt({ sessionID: activeChairID, text: promptText }, { signal: context.signal })
                   await promptWithTimeout(

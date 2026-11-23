@@ -4,10 +4,10 @@ A three-model code-review council plugin for [OpenCode](https://opencode.ai) V2.
 
 The council tool convenes three independent reviewers, each in its own throwaway git
 worktree with the change applied. They can run tests and read configured cross-reference
-roots, then return structured findings. A chair model merges the three reviews
-into a report with a consensus matrix (unanimous / majority / single-reviewer findings)
-and a prioritized action list. Give the council further feedback after a report and it
-re-runs all three reviewers on the same target.
+roots, then return structured findings. A chair model synthesizes the reviews into a
+verdict, summary, and prioritized action list, while the plugin appends a deterministic
+consensus matrix with each finding's severity, location, and reviewer votes. Give the
+council further feedback after a report and it re-runs all three reviewers on the same target.
 
 ## Requirements
 
@@ -86,6 +86,14 @@ tool. It re-runs the full council on the same target as the prior run in this se
 passing your feedback to every reviewer. If this session has no prior run, it asks you to
 run `/council` first. Each follow-up creates fresh sessions and sandboxes, and records a
 new run.
+
+### Report format
+
+The chair writes the verdict and summary, any disagreements or uncertainty, and a prioritized
+action list. It deliberately does not repeat findings grouped by reviewer agreement: the plugin
+appends the consensus matrix after the chair's text, with one row per finding and the reviewers'
+votes. Reviewer failures, dropped findings, session IDs, and the raw reviewer JSON are also
+appended by the plugin.
 
 ## Configuration
 
@@ -203,7 +211,7 @@ the configured reviewer and chair models when it creates their sessions.
 
 ```sh
 npm ci --legacy-peer-deps   # dev dependencies for tests and typecheck
-npm test                    # 67 tests
+npm test                    # 68 tests
 npm run typecheck
 ```
 
