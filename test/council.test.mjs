@@ -1427,7 +1427,7 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     const chairBrief = prompts.find((prompt) => prompt.sessionID === chairSession.id).text
     assert.ok(chairBrief.includes(referenceRoot), "the chair brief names the configured cross-reference root")
     assert.match(chairBrief, /appended verbatim after your report/)
-    assert.match(chairBrief, /do not reproduce or regroup it/, "the chair is told not to duplicate the matrix")
+    assert.match(chairBrief, /cite its rows by number/, "the chair is pointed at matrix rows instead of duplicating them")
 
     const worktrees = join(realpathSync(await stateRootFor(makeShell(), repo)), "opencode-council", "worktrees")
     const leftover = existsSync(worktrees) ? readdirSync(worktrees) : []
@@ -1950,10 +1950,10 @@ test("install copy mode replaces an identical foreign symlink", async () => {
 
 test("council chair prompt leaves the consensus matrix to the plugin", async () => {
   const text = await readFile(join(process.cwd(), "agents", "council-chair.md"), "utf8")
-  assert.match(text, /Do not regroup findings by reviewer agreement/)
-  assert.match(text, /do not reproduce the matrix/)
-  assert.match(text, /appended verbatim to the final report/)
+  assert.match(text, /The consensus matrix is the authoritative findings list/)
+  assert.match(text, /appended verbatim after your report/)
   assert.match(text, /prioritized action list/)
+  assert.doesNotMatch(text, /\b(do not|don't|never)\b/i, "chair instructions state what to do")
   assert.doesNotMatch(text, /Unanimous \(flagged by all three reviewers\)/)
   assert.doesNotMatch(text, /Majority \(two\)/)
   assert.doesNotMatch(text, /Single reviewer \(one\)/)
@@ -1998,6 +1998,7 @@ test("council reviewer can build and run tests but cannot install or destroy", a
     if (match) rules.push({ resource: match[1], effect: match[2] })
   }
   assert.ok(rules.length > 100, `parsed only ${rules.length} bash rules`)
+  assert.doesNotMatch(text, /\b(do not|don't|never)\b/i, "reviewer instructions state what to do")
 
   for (const command of [
     "bash test/service/run.sh",

@@ -8,5 +8,5 @@ Call the `council_followup` tool once with the user's feedback:
 
 The tool re-runs the full three-model council on the same target as the prior run in this
 session, passing the feedback to every reviewer. If it reports that no council has run in
-this session, relay that and tell the user to run `/council` first. Do not review the code
-yourself; relay the new council report as-is.
+this session, relay that and tell the user to run `/council` first. Relay the new council report
+as-is.

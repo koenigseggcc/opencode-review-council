@@ -387,7 +387,7 @@ function buildRepairPrompt(kind: RepairKind, problems: string[]): string {
     ...(shown.length > 0 ? ["", "Problems:", ...shown.map((problem) => `- ${problem}`)] : []),
     ...(hidden > 0 ? [`- ...and ${hidden} more`] : []),
     "",
-    "Reply now with ONLY the corrected JSON object, exactly once, using the analysis you already did. Do not run any more commands or tools, and do not start over.",
+    "Reply now with ONLY the corrected JSON object, exactly once, using the analysis you already did. Build on that analysis and skip further commands and tools.",
     "Keep every finding that was already valid; fix or remove only the invalid ones. The JSON object must match this schema:",
     JSON.stringify(FINDINGS_SCHEMA),
   ].join("\n")
@@ -1366,25 +1366,25 @@ const plugin = Plugin.define({
 
           const buildBrief = (sandbox: Sandbox) =>
             [
-              "This change is in review. Evaluate it, looking for issues, and report back. Don't make any source changes. If you decide to run any tests, ensure they do not collide with other review sessions.",
+              "This change is in review. Evaluate it, looking for issues, and report back. Keep source files unchanged. If you run tests, keep them isolated from other review sessions.",
               "",
               `Review target: ${label}`,
               `Patch file: ${patchPath} — read it first; it is the diff under review.`,
-              `Sandbox checkout: ${sandbox.dir} — a throwaway git worktree with the change applied. Other reviewers may be running the same tests on this machine concurrently: keep any test artifacts inside your sandbox, prefer unique temp paths, and avoid fixed ports or other shared resources. Dependency directories (node_modules, .venv, vendor) are shared with the main checkout via symlinks — read them, never write to them.`,
+              `Sandbox checkout: ${sandbox.dir} — a throwaway git worktree with the change applied. Other reviewers may be running the same tests on this machine concurrently: keep any test artifacts inside your sandbox, use unique temp paths, and use ephemeral ports and other run-private resources. Dependency directories (node_modules, .venv, vendor) are shared with the main checkout via symlinks — treat them as read-only.`,
               focus ? `Focus requested: ${focus}` : undefined,
               patchNote || undefined,
               "",
               "Read the patch and surrounding code before judging.",
-              `Build and run the project's tests when useful (shell tool with workdir ${sandbox.dir}, or cd into it). Prefer the project's own entry points, such as npm test, make test, ./gradlew test, pytest, or a checked-in runner like bash test/service/run.sh. Do not install or download dependencies; a checked-in runner may provision its own pinned tools. If you need environment variables, export them in a separate statement (export FOO=bar; npm test) rather than prefixing the command. Do not create, edit, or delete source files — run tests as-is; build artifacts and test temp files inside the sandbox are fine. Cite the command and observed result in the finding detail.`,
-              "Work efficiently: run the project's test suite at most twice, and never re-run a command whose output you already have or has not changed — if a command keeps producing the same result, stop and use it.",
+              `Build and run the project's tests when useful (shell tool with workdir ${sandbox.dir}, or cd into it). Prefer the project's own entry points, such as npm test, make test, ./gradlew test, pytest, or a checked-in runner like bash test/service/run.sh. Work with the dependencies already present; a checked-in runner may provision its own pinned tools. If you need environment variables, export them in a separate statement (export FOO=bar; npm test) rather than prefixing the command. Run tests as-is; build artifacts and test temp files inside the sandbox are fine. Cite the command and observed result in the finding detail.`,
+              "Work efficiently: run the project's test suite at most twice, reuse the output of commands you already ran, and stop when a repeated command produces the same result.",
               "Keep your final analysis concise: emit the JSON as soon as your findings are ready — a turn that exhausts the thinking budget before producing it wastes the review.",
-              "Environment: macOS with BSD userland — avoid GNU-only flags and escapes (e.g. sed \\x1b, grep -P, find -printf); they fail or silently do nothing here.",
-              `Never modify the main checkout at ${repoRoot}.`,
+              "Environment: macOS with BSD userland — use BSD-compatible flags and escapes; GNU-only forms such as sed \\x1b, grep -P, and find -printf fail or silently do nothing here.",
+              `Keep the main checkout at ${repoRoot} unchanged.`,
               crossReferenceRoots.length
                 ? `You may read other repositories under these configured cross-reference roots (read-only) for callers, conventions, or related implementations: ${crossReferenceRoots.join(", ")}.`
                 : undefined,
               "",
-              "FINISHING REQUIREMENT: end your turn with your complete findings as a single JSON object (verdict, summary, findings). Your final message must contain only that JSON object — no prose, no markdown fences, no tool calls.",
+              "FINISHING REQUIREMENT: end your turn with your complete findings as a single JSON object (verdict, summary, findings). Your final message is exactly that JSON object.",
               "The JSON object must match this schema:",
               JSON.stringify(FINDINGS_SCHEMA),
             ]
@@ -1577,7 +1577,7 @@ const plugin = Plugin.define({
                 ? `Cross-reference roots (read-only): ${crossReferenceRoots.join(", ")}`
                 : undefined,
               "",
-              "Consensus matrix (computed deterministically from the three reviews; ground truth, appended verbatim after your report — do not reproduce or regroup it):",
+              "Consensus matrix (computed deterministically from the three reviews; ground truth, appended verbatim after your report; cite its rows by number):",
               matrix,
               "",
               "Per-reviewer outputs (JSON):",
@@ -1609,7 +1609,7 @@ const plugin = Plugin.define({
                 const promptText =
                   attempt === 0
                     ? chairBrief
-                    : "Your previous turn ended before you produced the final report. Write the final council report now, in markdown, from the consensus matrix and reviewer outputs already in your context. Do not reproduce the matrix or regroup findings by reviewer agreement, and do not start over."
+                    : "Your previous turn ended before you produced the final report. Write the final council report now, in markdown, from the consensus matrix and reviewer outputs already in your context. Build on the analysis you already did, and cite matrix rows by number."
                 try {
                   await ctx.session.prompt({ sessionID: activeChairID, text: promptText }, { signal: context.signal })
                   await promptWithTimeout(

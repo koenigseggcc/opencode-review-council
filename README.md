@@ -90,10 +90,10 @@ new run.
 ### Report format
 
 The chair writes the verdict and summary, any disagreements or uncertainty, and a prioritized
-action list. It deliberately does not repeat findings grouped by reviewer agreement: the plugin
-appends the consensus matrix after the chair's text, with one row per finding and the reviewers'
-votes. Reviewer failures, dropped findings, session IDs, and the raw reviewer JSON are also
-appended by the plugin.
+action list. The plugin then appends the consensus matrix after the chair's text, with one row
+per finding and the reviewers' votes; the matrix is the authoritative findings list. Reviewer
+failures, dropped findings, session IDs, and the raw reviewer JSON are also appended by the
+plugin.
 
 ## Configuration
 
