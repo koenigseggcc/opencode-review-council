@@ -44,6 +44,7 @@ const {
   isSecretFile,
   loadCouncilConfig,
   councilConfigPath,
+  CHAIR_REPORT_MAX_WORDS,
 } = CouncilPlugin.__test
 const exec = promisify(execFile)
 const ARGV_SCRIPT = "console.log(JSON.stringify(process.argv.slice(1)))"
@@ -1428,6 +1429,11 @@ test("council run binds reviewer sessions to sandboxes, validates output, and re
     assert.ok(chairBrief.includes(referenceRoot), "the chair brief names the configured cross-reference root")
     assert.match(chairBrief, /appended verbatim after your report/)
     assert.match(chairBrief, /cite its rows by number/, "the chair is pointed at matrix rows instead of duplicating them")
+    assert.match(
+      chairBrief,
+      new RegExp(`concise, direct, and at most ${CHAIR_REPORT_MAX_WORDS} words`),
+      "the chair brief repeats the concision limit",
+    )
 
     const worktrees = join(realpathSync(await stateRootFor(makeShell(), repo)), "opencode-council", "worktrees")
     const leftover = existsSync(worktrees) ? readdirSync(worktrees) : []
@@ -1948,15 +1954,52 @@ test("install copy mode replaces an identical foreign symlink", async () => {
   }
 })
 
-test("council chair prompt leaves the consensus matrix to the plugin", async () => {
+test("council chair prompt defines the concise report contract", async () => {
   const text = await readFile(join(process.cwd(), "agents", "council-chair.md"), "utf8")
+  assert.ok(text.includes("# Council verdict: <approve|approve with comments|request changes|inconclusive>"))
+  assert.match(text, /## Disagreements & uncertainty/)
+  assert.match(text, /one bullet per disagreement or uncertainty/)
+  assert.match(text, /## Prioritized action list/)
+  assert.match(text, new RegExp(`at most ${CHAIR_REPORT_MAX_WORDS} words`))
   assert.match(text, /The consensus matrix is the authoritative findings list/)
   assert.match(text, /appended verbatim after your report/)
-  assert.match(text, /prioritized action list/)
+  assert.match(text, /If there are no findings and no disagreements or confidence concerns/)
   assert.doesNotMatch(text, /\b(do not|don't|never)\b/i, "chair instructions state what to do")
   assert.doesNotMatch(text, /Unanimous \(flagged by all three reviewers\)/)
   assert.doesNotMatch(text, /Majority \(two\)/)
   assert.doesNotMatch(text, /Single reviewer \(one\)/)
+})
+
+test("council chair retry prompt keeps the concision and matrix instructions", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "council-chair-retry-"))
+  try {
+    await exec("git", ["init", "-q"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "one\n")
+    await exec("git", ["add", "tracked.txt"], { cwd: repo })
+    await exec("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: repo })
+    await writeFile(join(repo, "tracked.txt"), "two\n")
+
+    let chairID
+    let chairWaits = 0
+    const { context, tools, prompts } = makeHarness(repo, {
+      onCreate: async (session) => {
+        if (session.agent === "council-chair") chairID = session.id
+      },
+      wait: async (input) => {
+        if (input.sessionID === chairID && chairWaits++ === 0) throw new Error("chair timeout")
+      },
+    })
+    await CouncilPlugin.setup(context)
+    const result = await tools.get("council").execute({}, context)
+
+    assert.match(result.output, /^# Chair report/m)
+    const chairPrompts = prompts.filter((prompt) => prompt.sessionID === chairID)
+    assert.equal(chairPrompts.length, 2, "the chair gets a brief and one retry")
+    assert.match(chairPrompts[1].text, new RegExp(`concise and direct, at most ${CHAIR_REPORT_MAX_WORDS} words`))
+    assert.match(chairPrompts[1].text, /cite matrix rows by number/)
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
 })
 
 test("council agents deny branch and tag creation", async () => {

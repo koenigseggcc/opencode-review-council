@@ -317,6 +317,8 @@ async function loadCouncilConfig(): Promise<{ config: CouncilConfig; path: strin
 const REVIEWER_TIMEOUT_MS = 40 * 60 * 1000
 const REVIEWER_DEADLINE_MS = REVIEWER_TIMEOUT_MS * 2
 const CHAIR_TIMEOUT_MS = 15 * 60 * 1000
+/** Maximum length of the chair's report; matrix and appended sections are not counted. */
+const CHAIR_REPORT_MAX_WORDS = 400
 const RUN_STALE_MS = 90 * 60 * 1000
 const SANDBOX_GRACE_MS = 15 * 60 * 1000
 /** Session follow-up records expire after this long without a council run. */
@@ -1585,7 +1587,8 @@ const plugin = Plugin.define({
               JSON.stringify(reviewerPayload, null, 2),
               "```",
               "",
-              "Write the final council report as instructed.",
+              "Write the final council report as instructed: concise, direct, and at most " +
+                `${CHAIR_REPORT_MAX_WORDS} words.`,
             ]
               .filter((line): line is string => line !== undefined)
               .join("\n")
@@ -1609,7 +1612,7 @@ const plugin = Plugin.define({
                 const promptText =
                   attempt === 0
                     ? chairBrief
-                    : "Your previous turn ended before you produced the final report. Write the final council report now, in markdown, from the consensus matrix and reviewer outputs already in your context. Build on the analysis you already did, and cite matrix rows by number."
+                    : `Your previous turn ended before you produced the final report. Write the final council report now, in markdown, concise and direct, at most ${CHAIR_REPORT_MAX_WORDS} words, from the consensus matrix and reviewer outputs already in your context. Build on the analysis you already did, and cite matrix rows by number.`
                 try {
                   await ctx.session.prompt({ sessionID: activeChairID, text: promptText }, { signal: context.signal })
                   await promptWithTimeout(
@@ -1780,6 +1783,7 @@ if (process.env.COUNCIL_TEST === "1") {
       isSecretFile,
       loadCouncilConfig,
       councilConfigPath,
+      CHAIR_REPORT_MAX_WORDS,
     },
   })
 }
